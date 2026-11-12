@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node --watch deploy/node.js",
     "start": "node deploy/node.js",
-    "test": "node --test tests/server.test.js tests/no-secret.test.js",
+    "test": "node --test tests/server.test.js tests/mock-central.test.js tests/no-secret.test.js",
     "test:mobile": "node --test tests/mobile.test.js",
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy"
