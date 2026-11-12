@@ -104,7 +104,7 @@ test('external_ref นับแยกตามสาขา และ batch ท�
 
 // ---------- group_report ----------
 
-test('group_report ทางปกติ: นับเข้ายอดสาขา · external_ref ซ้ำไม่นับซ้ำ', () => {
+test('group_report ทางปกติ: นับเข้ายอดแคมเปญ · external_ref ซ้ำไม่นับซ้ำ', () => {
   const c = clock();
   const central = createMockCentral({ now: c.now });
   const report = group({ participant_count: 4, minutes: 60, external_ref: 'sheet-row-7' });
@@ -126,6 +126,22 @@ test('group_report ทางปกติ: นับเข้ายอดสา�
   // วันถัดไปหน่วยงานเดิมส่งได้อีก
   c.nextDay();
   assert.equal(central.recordEvidence(BRANCH, batch([group()])).committed, true);
+});
+
+test('summary: นาทีกลุ่มนับเข้ายอดแคมเปญ แต่ไม่นับเข้ายอดรายสาขา (กติกา 49m)', () => {
+  const central = createMockCentral();
+  const r = central.recordEvidence(BRANCH, batch([practice('000-0001', 'morning'), group({ participant_count: 4, minutes: 60 })]));
+  assert.equal(r.committed, true);
+  const s = central.summary(BRANCH);
+  assert.equal(s.branch.minutes, 5);
+  assert.equal(s.branch.today_minutes, 5);
+  assert.equal(s.group_minutes, 60);
+  assert.equal(s.total_minutes, 65);
+  assert.equal(s.today_minutes, 65);
+  // สาขาอื่นไม่เห็นนาทีของสาขานี้ในยอดรายสาขาหรือยอดกลุ่ม
+  const other = central.summary('001');
+  assert.equal(other.branch.minutes, 0);
+  assert.equal(other.group_minutes, 0);
 });
 
 test('group_report: เพดานนาที = participant_count × 15 พอดีผ่าน เกิน 1 ไม่ผ่าน', () => {

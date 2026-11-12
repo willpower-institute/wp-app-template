@@ -114,7 +114,6 @@ export function createMockCentral({
   );
   const groupReports = new Map(); // `${branch}|${org_ref}|${date}` -> evidence_id
   let totalMinutes = 0;
-  let groupMinutes = 0;
 
   const personKey = (ref) => `${ref.source}:${ref.value}`;
   const asOf = () => now().toISOString();
@@ -135,6 +134,8 @@ export function createMockCentral({
     registeredOrgs.get(branch).add(orgRef);
   }
 
+  // ยอดรวมแคมเปญรวมรายงานกลุ่ม แต่ยอดรายสาขานับเฉพาะรายคน (กติกา 49m:
+  // นาทีของหน่วยงานภายนอกไม่ทำให้อันดับสาขาได้แต้ม)
   function summary(branch) {
     const today = localDate(timezone, now());
     let todayMinutes = 0;
@@ -144,6 +145,17 @@ export function createMockCentral({
     for (const [key, report] of groupReports) {
       if (key.endsWith(`|${today}`)) todayMinutes += report.minutes;
     }
+    let branchMinutes = 0;
+    let branchToday = 0;
+    for (const row of rows) {
+      if (row.branch !== branch) continue;
+      branchMinutes += row.minutes;
+      if (row.date === today) branchToday += row.minutes;
+    }
+    let branchGroup = 0;
+    for (const [key, report] of groupReports) {
+      if (key.startsWith(`${branch}|`)) branchGroup += report.minutes;
+    }
     return {
       contract_version: CONTRACT_VERSION,
       demo: true,
@@ -151,9 +163,9 @@ export function createMockCentral({
       target_minutes: RULES.targetMinutes,
       total_minutes: totalMinutes,
       today_minutes: todayMinutes,
-      group_minutes: groupMinutes,
+      group_minutes: branchGroup,
       participants: people.size,
-      branch: { code: branch, minutes: totalMinutes },
+      branch: { code: branch, minutes: branchMinutes, today_minutes: branchToday },
     };
   }
 
@@ -333,7 +345,6 @@ export function createMockCentral({
       for (const [key, report] of pendingGroups) {
         groupReports.set(key, report);
         totalMinutes += report.minutes;
-        groupMinutes += report.minutes;
       }
       for (const [ext, id] of pendingExternal) externalRefs.set(`${branch}|${ext}`, id);
     }
