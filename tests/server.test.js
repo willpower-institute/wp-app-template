@@ -8,7 +8,7 @@ import { createApp, resolveMode } from '../server/app.js';
 import { createMockCentral, localDate } from '../contract/mock-central.js';
 import baseConfig from '../wp.config.js';
 
-const TOKEN = 'wp_test_token_DO_NOT_LEAK_7f3a9c'; // gitleaks:allow — token ปลอมสำหรับเทสต์
+const CREDENTIAL = 'wp_test_credential_DO_NOT_LEAK_7f3a9c'; // gitleaks:allow — credential ปลอมสำหรับเทสต์
 
 const appWith = (env = {}, cfg = baseConfig) => createApp({ readEnv: () => env, cfg });
 const json = async (res) => ({ status: res.status, body: await res.json() });
@@ -109,14 +109,14 @@ test('ปิดโครงการใน wp.config.js แล้ว route ข�
 // ---------- ตั้งค่าครึ่งเดียว ----------
 
 test('ตั้งค่าไม่ครบหรือผิด = ปฏิเสธทุกคำขอ ไม่ถอยไปโหมดตัวอย่าง', async () => {
-  assert.equal(resolveMode({ WP_CENTRAL_URL: 'https://central.example' }).reason, 'TOKEN_MISSING');
-  assert.equal(resolveMode({ WP_TOKEN: TOKEN }).reason, 'CENTRAL_URL_MISSING');
-  assert.equal(resolveMode({ WP_CENTRAL_URL: 'not a url', WP_TOKEN: TOKEN }).reason, 'CENTRAL_URL_INVALID');
+  assert.equal(resolveMode({ WP_CENTRAL_URL: 'https://central.example' }).reason, 'APP_CREDENTIAL_MISSING');
+  assert.equal(resolveMode({ WP_APP_CREDENTIAL: CREDENTIAL }).reason, 'CENTRAL_URL_MISSING');
+  assert.equal(resolveMode({ WP_CENTRAL_URL: 'not a url', WP_APP_CREDENTIAL: CREDENTIAL }).reason, 'CENTRAL_URL_INVALID');
   assert.equal(
-    resolveMode({ WP_CENTRAL_URL: 'http://central.example', WP_TOKEN: TOKEN }).reason,
+    resolveMode({ WP_CENTRAL_URL: 'http://central.example', WP_APP_CREDENTIAL: CREDENTIAL }).reason,
     'CENTRAL_URL_NOT_HTTPS',
   );
-  assert.equal(resolveMode({ WP_CENTRAL_URL: 'http://127.0.0.1:9', WP_TOKEN: TOKEN }).mode, 'live');
+  assert.equal(resolveMode({ WP_CENTRAL_URL: 'http://127.0.0.1:9', WP_APP_CREDENTIAL: CREDENTIAL }).mode, 'live');
 
   const app = appWith({ WP_CENTRAL_URL: 'https://central.example' });
   const h = await json(await app.request('/api/health'));
@@ -124,7 +124,7 @@ test('ตั้งค่าไม่ครบหรือผิด = ปฏิ�
   assert.equal(h.body.mode, 'misconfigured');
   const r = await json(await app.request('/api/campaign/summary'));
   assert.equal(r.status, 503);
-  assert.equal(r.body.code, 'TOKEN_MISSING');
+  assert.equal(r.body.code, 'APP_CREDENTIAL_MISSING');
 });
 
 // ---------- โหมดจริง (ระบบกลางปลอม) ----------
@@ -142,13 +142,13 @@ async function fakeCentral(handler) {
   return { url, seen, close: () => new Promise((r) => server.close(r)) };
 }
 
-test('โหมดจริง: ส่ง token ไประบบกลางเท่านั้น ไม่หลุดกลับมาที่ผู้ใช้', async () => {
+test('โหมดจริง: ส่ง app credential ไประบบกลางเท่านั้น ไม่หลุดกลับมาที่ผู้ใช้', async () => {
   const central = await fakeCentral(() => ({
     status: 200,
     body: { contract_version: 'campaign.v1', total_minutes: 120, today_minutes: 15, participants: 3, target_minutes: 76000000, as_of: new Date().toISOString() },
   }));
   try {
-    const app = appWith({ WP_CENTRAL_URL: central.url, WP_TOKEN: TOKEN });
+    const app = appWith({ WP_CENTRAL_URL: central.url, WP_APP_CREDENTIAL: CREDENTIAL });
     const responses = [];
     for (const path of ['/api/health', '/api/config', '/api/campaign/summary']) {
       const res = await app.request(path);
@@ -157,8 +157,8 @@ test('โหมดจริง: ส่ง token ไประบบกลาง�
     assert.equal(JSON.parse(responses[0]).mode, 'live');
     assert.equal(JSON.parse(responses[2]).total_minutes, 120);
     assert.equal(central.seen[0].url, `/campaign/v1/branches/${baseConfig.branch.code}/summary`);
-    assert.equal(central.seen[0].auth, `Bearer ${TOKEN}`);
-    for (const text of responses) assert.ok(!text.includes(TOKEN), 'token หลุดใน response');
+    assert.equal(central.seen[0].auth, `Bearer ${CREDENTIAL}`);
+    for (const text of responses) assert.ok(!text.includes(CREDENTIAL), 'credential หลุดใน response');
   } finally {
     await central.close();
   }
@@ -167,7 +167,7 @@ test('โหมดจริง: ส่ง token ไประบบกลาง�
 test('โหมดจริง: บันทึกรายคนปิดไว้จนกว่าจะตกลงวิธียืนยันตัวตนสมาชิก', async () => {
   const central = await fakeCentral(() => ({ status: 200, body: {} }));
   try {
-    const app = appWith({ WP_CENTRAL_URL: central.url, WP_TOKEN: TOKEN });
+    const app = appWith({ WP_CENTRAL_URL: central.url, WP_APP_CREDENTIAL: CREDENTIAL });
     let r = await json(await post(app, '/api/campaign/practice', { member: '000-0001', slot: 'morning', event_id: 'evt-0009-zzzz' }));
     assert.equal(r.status, 501);
     assert.equal(r.body.code, 'MEMBER_AUTH_NOT_DECIDED');
@@ -181,7 +181,7 @@ test('โหมดจริง: บันทึกรายคนปิดไว
 
 test('โหมดจริง: แปลง error ของระบบกลางโดยไม่ส่งรายละเอียดต่อ', async () => {
   const cases = [
-    [{ status: 401, body: { detail: 'token revoked for branch 000' } }, 502, 'CENTRAL_AUTH_FAILED'],
+    [{ status: 401, body: { detail: 'credential revoked for branch 000' } }, 502, 'CENTRAL_AUTH_FAILED'],
     [{ status: 403, body: { code: 'BRANCH_MISMATCH' } }, 403, 'BRANCH_MISMATCH'],
     [{ status: 500, body: { message: 'stack trace…' } }, 502, 'CENTRAL_ERROR'],
     [{ status: 400, body: { code: 'lower-case not allowed' } }, 400, 'CENTRAL_ERROR'],
@@ -189,7 +189,7 @@ test('โหมดจริง: แปลง error ของระบบกล�
   for (const [reply, status, code] of cases) {
     const central = await fakeCentral(() => reply);
     try {
-      const app = appWith({ WP_CENTRAL_URL: central.url, WP_TOKEN: TOKEN });
+      const app = appWith({ WP_CENTRAL_URL: central.url, WP_APP_CREDENTIAL: CREDENTIAL });
       const res = await app.request('/api/campaign/summary');
       const text = await res.text();
       assert.equal(res.status, status, code);
@@ -204,7 +204,7 @@ test('โหมดจริง: ระบบกลางล่ม = 503 CENTRAL_
   const central = await fakeCentral(() => ({ status: 200, body: {} }));
   const url = central.url;
   await central.close();
-  const app = appWith({ WP_CENTRAL_URL: url, WP_TOKEN: TOKEN });
+  const app = appWith({ WP_CENTRAL_URL: url, WP_APP_CREDENTIAL: CREDENTIAL });
   const r = await json(await app.request('/api/campaign/summary'));
   assert.equal(r.status, 503);
   assert.equal(r.body.code, 'CENTRAL_UNREACHABLE');

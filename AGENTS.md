@@ -13,14 +13,21 @@
 
 ## กติกาที่ห้ามละเมิด (ทั้งคนและ AI)
 
-1. **token อยู่ใน server เท่านั้น** — อ่านจาก env `WP_TOKEN` ใน `server/` · ห้ามอยู่ใน `public/`, `wp.config.js`,
+1. **app credential อยู่ใน server เท่านั้น** — อ่านจาก env `WP_APP_CREDENTIAL` ใน `server/` · ห้ามอยู่ใน `public/`, `wp.config.js`,
    ข้อความ error, log หรือ response ใด ๆ · เทสต์ `tests/no-secret.test.js` และเทสต์โหมดจริงจับเรื่องนี้
 2. **หน้าเว็บและ server ของแอปไม่คิดผลเอง** — นาที ยอด เพดาน อันดับ วันที่ เป็นของระบบกลาง ·
    แอปส่ง evidence ดิบตาม contract แล้วแสดงตามที่ระบบกลางตอบ · ข้อยกเว้นเดียวคือ `contract/mock-central.js` ที่เล่นบทระบบกลาง
-3. **ตั้งค่าครึ่งเดียว = ปฏิเสธ** — มี URL ไม่มี token (หรือกลับกัน) ต้องตอบ 503 ไม่ถอยไปโหมดตัวอย่าง
+3. **ตั้งค่าครึ่งเดียว = ปฏิเสธ** — มี URL ไม่มี credential (หรือกลับกัน) ต้องตอบ 503 ไม่ถอยไปโหมดตัวอย่าง
 4. **ไม่เดาเรื่องที่ยังไม่ตัดสิน** — เช่นวิธียืนยันตัวตนสมาชิก · ปิดไว้ (`MEMBER_AUTH_NOT_DECIDED`) จนกว่าระบบกลางออก contract
 5. **ระบบกลางเป็นเจ้าของ contract** — `contract/campaign.v1.md` เป็นร่างฝั่งแอป · เมื่อระบบกลางออกของจริง แก้ตามระบบกลาง
 6. ทุก `/api/*` ส่ง error เป็น `{ "code": "ตัวพิมพ์ใหญ่" }` ไม่ส่งรายละเอียดจากระบบกลางต่อ
+
+## คำที่ใช้
+
+- **app credential** — พิสูจน์ว่าคำขอมาจากแอปไหน · env `WP_APP_CREDENTIAL` · ส่งเป็น `Authorization: Bearer` แบบ server ต่อ server
+- **member session** — บอกว่าสมาชิกคนไหนเป็นคนกด · ยังไม่ได้ตกลงรูปแบบ
+- **grant** — สิทธิ์ของแอปต่อ (สาขา × โครงการ) · ระบบกลาง (pstack-willpower) ถือ
+- อย่าเรียก "client token" — "client" ในเอกสารของเราหมายถึงฝั่งหน้าเว็บ
 
 ## เมื่อสาขาสร้างแอปจาก template นี้
 
@@ -41,7 +48,7 @@
 |---|---|
 | `public/` | หน้าเว็บ (HTML/CSS/JS ล้วน ไม่มีขั้น build) |
 | `server/app.js` | Hono: `/api/health` `/api/config` `/api/campaign/*` |
-| `server/central.js` | ตัวเชื่อมระบบกลางจริง (ถือ token) |
+| `server/central.js` | ตัวเชื่อมระบบกลางจริง (ถือ app credential) |
 | `contract/` | ร่าง contract + ระบบกลางจำลอง |
 | `deploy/cloudflare.js` · `api/index.js` · `deploy/node.js` | ทางเข้าของ Cloudflare · Vercel · Node/Cloud Run |
 | `wrangler.jsonc` · `vercel.json` · `Dockerfile` + `app.json` | config ของแต่ละแพลตฟอร์ม |

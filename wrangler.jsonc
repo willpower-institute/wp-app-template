@@ -1,6 +1,6 @@
 {
   // Cloudflare Workers — ใช้กับปุ่ม Deploy to Cloudflare และ `npm run deploy:cf`
-  // WP_CENTRAL_URL และ WP_TOKEN ตั้งทีหลังใน dashboard (Settings → Variables and Secrets) ไม่ใส่ในไฟล์นี้
+  // WP_CENTRAL_URL และ WP_APP_CREDENTIAL ตั้งทีหลังใน dashboard (Settings → Variables and Secrets) ไม่ใส่ในไฟล์นี้
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wp-app",
   "main": "deploy/cloudflare.js",

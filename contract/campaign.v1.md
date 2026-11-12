@@ -16,7 +16,7 @@
 
 ## 2. การยืนยันตัวตน
 
-- **แอป:** `Authorization: Bearer <token>` · token หนึ่งชุดผูก (สาขา × โครงการ) ออกโดยระบบกลางหลังอนุมัติคำขอเข้าร่วม ·
+- **แอป (app credential):** `Authorization: Bearer <app credential>` · credential ของแอปสาขา ใช้ได้เฉพาะ grant ที่ผูกไว้ (สาขา × โครงการ) ออกโดยระบบกลางหลังอนุมัติคำขอเข้าร่วม ·
   เก็บเป็น secret ของแพลตฟอร์ม ใช้จาก server ของแอปเท่านั้น
 - **สมาชิก:** ยังไม่ตัดสิน (login ที่ระบบกลางทั้งหมด หรือสาขามี login เอง) · ระหว่างนี้แอปปิดการบันทึกรายคนในโหมดจริง
   (`MEMBER_AUTH_NOT_DECIDED`) · `person_ref.source = "demo"` ใช้ได้กับระบบกลางจำลองเท่านั้น
@@ -58,7 +58,7 @@
 | รหัส | ความหมาย |
 |---|---|
 | `UNSUPPORTED_CONTRACT_VERSION` | ไม่ใช่ `campaign.v1` |
-| `BRANCH_MISMATCH` | `branch` ไม่ตรงกับ path หรือกับ token |
+| `BRANCH_MISMATCH` | `branch` ไม่ตรงกับ path หรือกับ grant ของ credential |
 | `INVALID_BATCH_REF` / `INVALID_ENVELOPES` / `INVALID_EVIDENCE_ID` / `INVALID_PERSON_REF` | รูปแบบผิด |
 | `BATCH_REF_REUSED` | ดูข้อ 4 |
 | `DUPLICATE_EVIDENCE_IN_BATCH` | `evidence_id` ซ้ำใน batch เดียว |

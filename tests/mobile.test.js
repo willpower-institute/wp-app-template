@@ -23,7 +23,7 @@ before(async () => {
   if (!existsSync(chromePath)) return;
   server = spawn(process.execPath, ['deploy/node.js'], {
     cwd: root,
-    env: { ...process.env, PORT: '0', WP_CENTRAL_URL: '', WP_TOKEN: '' },
+    env: { ...process.env, PORT: '0', WP_CENTRAL_URL: '', WP_APP_CREDENTIAL: '' },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   baseUrl = await new Promise((resolve, reject) => {

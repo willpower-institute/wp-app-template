@@ -1,11 +1,11 @@
 // ส่วน server เล็กของแอปสาขา (Hono) — รันได้ทั้ง Cloudflare Workers, Vercel และ Node (Cloud Run)
 //
 // หน้าที่มีแค่สามอย่าง:
-//   1. ถือ token ของสาขา (secret ของแพลตฟอร์ม) แล้วคุยกับระบบกลางแทนเบราว์เซอร์
+//   1. ถือ app credential ของสาขา (secret ของแพลตฟอร์ม) แล้วคุยกับระบบกลางแทนเบราว์เซอร์
 //   2. ส่ง evidence ดิบ (เช่น "นั่งครบ 5 นาที ช่วงเช้า") ตาม contract — ไม่คิดนาที ยอด หรืออันดับเอง
 //   3. ส่งค่าสาธารณะใน wp.config.js ให้หน้าเว็บ
 //
-// ไม่มี WP_CENTRAL_URL และ WP_TOKEN = โหมดตัวอย่าง ใช้ระบบกลางจำลองใน contract/mock-central.js
+// ไม่มี WP_CENTRAL_URL และ WP_APP_CREDENTIAL = โหมดตัวอย่าง ใช้ระบบกลางจำลองใน contract/mock-central.js
 
 import { Hono } from 'hono';
 import { env as platformEnv } from 'hono/adapter';
@@ -24,10 +24,10 @@ const SLOTS = new Set(['morning', 'midday', 'evening']);
 /** อ่านโหมดจาก env — ตั้งค่าครึ่งเดียวถือว่าผิด และปฏิเสธทุกคำขอ (ไม่ถอยไปโหมดตัวอย่างเงียบ ๆ) */
 export function resolveMode(e = {}) {
   const url = String(e.WP_CENTRAL_URL ?? '').trim();
-  const token = String(e.WP_TOKEN ?? '').trim();
-  if (!url && !token) return { mode: 'demo' };
+  const credential = String(e.WP_APP_CREDENTIAL ?? '').trim();
+  if (!url && !credential) return { mode: 'demo' };
   if (!url) return { mode: 'misconfigured', reason: 'CENTRAL_URL_MISSING' };
-  if (!token) return { mode: 'misconfigured', reason: 'TOKEN_MISSING' };
+  if (!credential) return { mode: 'misconfigured', reason: 'APP_CREDENTIAL_MISSING' };
   let u;
   try {
     u = new URL(url);
@@ -36,7 +36,7 @@ export function resolveMode(e = {}) {
   }
   const httpOk = u.protocol === 'https:' || (u.protocol === 'http:' && LOCAL_HOSTS.has(u.hostname));
   if (!httpOk) return { mode: 'misconfigured', reason: 'CENTRAL_URL_NOT_HTTPS' };
-  return { mode: 'live', url, token };
+  return { mode: 'live', url, credential };
 }
 
 /** ค่าที่ส่งให้เบราว์เซอร์ — เลือกเฉพาะ field ที่ประกาศไว้ ไม่ส่งทั้ง object */
@@ -73,7 +73,7 @@ export function createApp({ readEnv = (c) => platformEnv(c), cfg = config, mock 
     const m = modeOf(c);
     if (m.mode === 'demo') return { mode: 'demo', central: demoCentral };
     if (m.mode === 'live') {
-      return { mode: 'live', central: createCentralClient({ baseUrl: m.url, token: m.token }) };
+      return { mode: 'live', central: createCentralClient({ baseUrl: m.url, credential: m.credential }) };
     }
     throw new ContractError(503, m.reason);
   };

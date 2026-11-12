@@ -1,5 +1,5 @@
-// ตัวเชื่อมระบบกลางจริง (โหมด live) — คุยแบบ server ต่อ server ด้วย token ของสาขา
-// token ไม่เคยออกจากไฟล์นี้: ไม่ส่งให้เบราว์เซอร์ ไม่เขียนลง log ไม่ใส่ใน error
+// ตัวเชื่อมระบบกลางจริง (โหมด live) — คุยแบบ server ต่อ server ด้วย app credential ของสาขา
+// credential ไม่เคยออกจากไฟล์นี้: ไม่ส่งให้เบราว์เซอร์ ไม่เขียนลง log ไม่ใส่ใน error
 // path ตามร่าง contract `campaign.v1` (contract/campaign.v1.md) — จะปรับเมื่อระบบกลางออก contract จริง
 
 import { ContractError } from '../contract/mock-central.js';
@@ -7,7 +7,7 @@ import { ContractError } from '../contract/mock-central.js';
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/;
 const TIMEOUT_MS = 8000;
 
-export function createCentralClient({ baseUrl, token, fetchImpl = fetch }) {
+export function createCentralClient({ baseUrl, credential, fetchImpl = fetch }) {
   const base = baseUrl.replace(/\/+$/, '');
 
   async function call(method, path, body) {
@@ -16,7 +16,7 @@ export function createCentralClient({ baseUrl, token, fetchImpl = fetch }) {
       res = await fetchImpl(`${base}${path}`, {
         method,
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: `Bearer ${credential}`,
           accept: 'application/json',
           ...(body ? { 'content-type': 'application/json' } : {}),
         },
@@ -35,7 +35,7 @@ export function createCentralClient({ baseUrl, token, fetchImpl = fetch }) {
     }
     if (res.ok && data) return data;
 
-    // token ผิด/หมดอายุ/ถูกถอน — ไม่บอกรายละเอียดต่อ เพราะผู้ใช้ปลายทางแก้เองไม่ได้
+    // credential ผิด/หมดอายุ/ถูกถอน — ไม่บอกรายละเอียดต่อ เพราะผู้ใช้ปลายทางแก้เองไม่ได้
     if (res.status === 401) throw new ContractError(502, 'CENTRAL_AUTH_FAILED');
     const code = data && typeof data.code === 'string' && CODE_PATTERN.test(data.code) ? data.code : 'CENTRAL_ERROR';
     const status = res.status >= 500 || !res.status ? 502 : res.status;
