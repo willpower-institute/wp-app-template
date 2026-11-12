@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+.wrangler/
+.vercel/
+artifacts/
+.DS_Store
+.vscode/
+.idea/

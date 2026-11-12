@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Test (server · contract จำลอง · กันความลับรั่ว)
+        run: npm test
+      - name: npm audit (เฉพาะ dependency ที่ใช้ตอนรัน)
+        run: npm audit --omit=dev --audit-level=high
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # runner ของ GitHub มี Google Chrome ติดมาแล้วที่ /usr/bin/google-chrome
+      - name: จอ 390px · ตัวอักษร 1.6×
+        run: npm run test:mobile
+      - name: เก็บภาพหน้าจอให้เจ้าของโครงการดู
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-screenshots
+          path: artifacts/
+          if-no-files-found: ignore
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # gitleaks ต้องเห็นทั้ง history
+      # --redact: กัน secret ที่เจอถูกพิมพ์ลง log ของ Actions
+      - name: gitleaks (ทั้ง git history)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            git /repo --no-banner --redact --exit-code 1
+
+  # gate: required status check ตัวเดียวของ repo นี้คือ "ci"
+  ci:
+    if: always()
+    needs: [test, mobile, secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate
+        run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo "::error::มี job ก่อนหน้าไม่ผ่าน — ดูรายละเอียดที่ job ที่แดง"
+            exit 1
+          fi
+          echo "ผ่านทั้งหมด"

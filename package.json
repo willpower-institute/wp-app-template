@@ -1,0 +1,24 @@
+{
+  "name": "wp-app-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "แม่แบบแอปของสาขา สถาบันพลังจิตตานุภาพ — deploy เองบน Cloudflare / Vercel / Google แล้วเชื่อมระบบกลาง (pstack)",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node --watch deploy/node.js",
+    "start": "node deploy/node.js",
+    "test": "node --test tests/server.test.js tests/no-secret.test.js",
+    "test:mobile": "node --test tests/mobile.test.js",
+    "dev:cf": "wrangler dev",
+    "deploy:cf": "wrangler deploy"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.7",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.0",
+    "wrangler": "^4.160.1"
+  }
+}

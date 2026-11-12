@@ -1,0 +1,123 @@
+/* มือถือก่อน · ทุกขนาดเป็น rem เพื่อให้ขยายตัวอักษร 1.6 เท่าแล้วไม่ล้นจอ (ตรวจใน tests/mobile.test.js) */
+:root {
+  --primary: #8a5a00;
+  --background: #fffaf0;
+  --text: #2b2118;
+  --muted: #6b5d50;
+  --card: #ffffff;
+  --border: #e8dcc8;
+  --ok: #2f6b3a;
+  --warn: #8a4b00;
+}
+
+* { box-sizing: border-box; }
+
+/* ให้ attribute hidden ชนะ display ที่ตั้งใน class (เช่น .slots เป็น grid) */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--background);
+  overflow-wrap: break-word;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  max-width: 40rem;
+  margin: 0 auto;
+}
+.top img { width: 2.5rem; height: 2.5rem; flex: none; }
+.top-text { min-width: 0; }
+.org { margin: 0; font-size: 0.85rem; color: var(--muted); }
+h1 { margin: 0; font-size: 1.25rem; line-height: 1.3; }
+h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+
+main, footer { max-width: 40rem; margin: 0 auto; padding: 0 1rem; }
+
+.banner {
+  max-width: 40rem;
+  margin: 0 auto 0.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  background: #fff3d6;
+  border-block: 1px solid var(--border);
+}
+.banner.live { background: #e8f3ea; }
+.banner.error { background: #fde8e4; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.stats div { background: var(--background); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+.stats dt { font-size: 0.8rem; color: var(--muted); }
+.stats dd { margin: 0; font-size: 1.25rem; font-weight: 600; }
+
+.progress { height: 0.5rem; background: var(--border); border-radius: 1rem; overflow: hidden; }
+.progress span { display: block; height: 100%; width: 0; background: var(--primary); }
+
+/* minmax(0, 1fr): กัน input ดันคอลัมน์กว้างเกินจอตามขนาดตั้งต้นของเบราว์เซอร์ */
+.row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.25rem; margin: 0.75rem 0; }
+.row-inline { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.row-inline input { flex: 1 1 10rem; min-width: 0; width: 100%; }
+
+input, button {
+  font: inherit;
+  min-height: 2.75rem;
+  border-radius: 0.5rem;
+}
+input { padding: 0.25rem 0.75rem; border: 1px solid var(--border); background: #fff; color: inherit; }
+button {
+  padding: 0.25rem 1rem;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--primary); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.slots { list-style: none; padding: 0; margin: 0.75rem 0; display: grid; gap: 0.5rem; }
+.slots li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+.slots .done { color: var(--ok); font-weight: 600; }
+
+.timer { text-align: center; padding: 1rem 0; }
+.clock { font-size: 3rem; font-variant-numeric: tabular-nums; margin: 0.25rem 0; }
+
+.notice { padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: #fff3d6; }
+.message { min-height: 1.6em; margin: 0.5rem 0 0; }
+.message.ok { color: var(--ok); }
+.message.error { color: var(--warn); }
+
+footer { padding-bottom: 2rem; }

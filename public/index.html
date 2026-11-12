@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>แอปสาขา · สถาบันพลังจิตตานุภาพ</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <img id="logo" src="/logo.svg" alt="" width="40" height="40">
+    <div class="top-text">
+      <p class="org">สถาบันพลังจิตตานุภาพ</p>
+      <h1 id="branch-name">กำลังโหลด…</h1>
+    </div>
+  </header>
+
+  <p id="mode-banner" class="banner" hidden></p>
+
+  <main>
+    <section id="campaign" class="card" hidden aria-labelledby="campaign-title">
+      <h2 id="campaign-title">โครงการ</h2>
+      <p id="campaign-subtitle" class="muted"></p>
+
+      <dl class="stats">
+        <div><dt>นาทีสะสมทั้งโครงการ</dt><dd id="stat-total">–</dd></div>
+        <div><dt>วันนี้</dt><dd id="stat-today">–</dd></div>
+        <div><dt>ผู้ร่วมโครงการ</dt><dd id="stat-people">–</dd></div>
+      </dl>
+      <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+      <p id="progress-text" class="muted small"></p>
+    </section>
+
+    <section id="practice" class="card" hidden aria-labelledby="practice-title">
+      <h2 id="practice-title">ฝึกและบันทึก</h2>
+
+      <p id="practice-locked" class="notice" hidden>
+        การบันทึกรายคนในโหมดเชื่อมระบบจริงยังปิดอยู่ จนกว่าจะตกลงวิธียืนยันตัวตนสมาชิกกับระบบกลาง
+      </p>
+
+      <form id="member-form" class="row">
+        <label for="member">รหัสสมาชิก (ทดลอง)</label>
+        <div class="row-inline">
+          <input id="member" name="member" inputmode="text" autocomplete="off"
+                 placeholder="เช่น 000-0001" pattern="[0-9A-Za-z\-]{3,32}" required>
+          <button type="submit">ดูสถานะวันนี้</button>
+        </div>
+      </form>
+
+      <ul id="slots" class="slots" hidden></ul>
+
+      <div id="timer" class="timer" hidden>
+        <p id="timer-label">กำลังฝึก</p>
+        <p id="timer-clock" class="clock" aria-live="polite">05:00</p>
+        <button id="timer-cancel" type="button" class="secondary">ยกเลิก</button>
+      </div>
+
+      <p id="practice-message" class="message" role="status"></p>
+    </section>
+  </main>
+
+  <footer>
+    <p id="contact" class="muted small"></p>
+    <p class="muted small">สร้างจาก wp-app-template · ยอดและกติกาคำนวณที่ระบบกลาง</p>
+  </footer>
+</body>
+</html>

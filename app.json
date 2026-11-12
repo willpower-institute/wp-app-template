@@ -1,0 +1,6 @@
+{
+  "name": "wp-app",
+  "options": {
+    "allow-unauthenticated": true
+  }
+}

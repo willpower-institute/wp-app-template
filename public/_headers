@@ -1,0 +1,5 @@
+# Cloudflare Static Assets — header ของหน้าเว็บ (Vercel ใช้ vercel.json · Node ใช้ secureHeaders)
+/*
+  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer

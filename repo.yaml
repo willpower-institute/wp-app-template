@@ -1,0 +1,38 @@
+# repo.yaml: Knowledge Standard draft schema v0.2 (private central source)
+# สาขาที่สร้างแอปจาก template นี้: แก้ทุกค่าด้านล่างให้เป็นของสาขา
+schema_version: "0.2"
+name: willpower-institute/wp-app-template
+owner:
+  team: อนุกรรมการ IT
+  humans: [TBD]
+workstream: "wp app template (branch frontend)"
+status: draft
+purpose: "Template for branch apps that deploy on Cloudflare, Vercel or Google and connect to the central pstack system through per-domain contracts."
+default_branch: main
+version_source: package.json
+stack: [JavaScript, Hono, Cloudflare Workers, Vercel, Google Cloud Run, Node 22]
+depends_on:
+  - repo: willpower-institute/pstack
+    pin: null
+    why: "ADR-0001 (branch frontend / central backend of record); this repo never imports pstack code"
+  - repo: willpower-institute/pstack-willpower
+    pin: null
+    why: "per-branch credentials and grants (planned)"
+  - repo: willpower-institute/pstack-lms
+    pin: null
+    why: "docs/BRANCH_FRONTEND_INTEGRATION.md is the pattern campaign.v1 follows"
+supersedes: []
+superseded_by: null
+canonical_for:
+  - "starting layout for branch apps"
+knowledge_files:
+  agents_md: AGENTS.md
+  claude_md: null
+  adr_dir: null
+  rationale_home: "README.md · contract/campaign.v1.md · ws-001 dis-174e74f7"
+  changelog: null
+  changelog_alternative: "git log and GitHub pull-request history"
+  openapi: null
+last_reviewed: 2026-11-12
+review_interval_days: 90
+ws001: [dis-174e74f7, dis-65134078]
