@@ -490,3 +490,80 @@ test('today_minutes และ branch.today_minutes ข้ามวัน: แถ
   assert.equal(s.today_minutes, 5);
   assert.equal(s.branch.today_minutes, 5);
 });
+
+// ---------- v0.3: ตัวตน = person_ref.value · source ต้องอยู่ในรายการ ----------
+
+const ref = (source, value) => ({ source, value });
+const withRef = (person_ref, slot) => ({ ...practice('x', slot), person_ref });
+
+test('v0.3 source นอกรายการที่แคมเปญรับ = INVALID_PERSON_REF ทั้ง recordEvidence และ personToday', () => {
+  const central = createMockCentral();
+  for (const source of ['line', 'LINE', 'Member', 'phone']) {
+    const r = central.recordEvidence(BRANCH, batch([practice('000-0009', 'morning'), withRef(ref(source, '000-0001'), 'midday')]));
+    assert.equal(r.committed, false, source);
+    assert.deepEqual(r.rejected.map((x) => x.code), ['INVALID_PERSON_REF']);
+    assert.throws(() => central.personToday(BRANCH, ref(source, '000-0001')), { status: 400, code: 'INVALID_PERSON_REF' }, source);
+  }
+  // ค่าตั้งต้นรับ demo และ member · กำหนดรายการต่อแคมเปญได้
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0002'), 'morning')])).committed, true);
+  const memberOnly = createMockCentral({ personSources: ['member'] });
+  assert.equal(memberOnly.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0001'), 'morning')])).rejected[0].code, 'INVALID_PERSON_REF');
+  assert.equal(memberOnly.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'morning')])).committed, true);
+});
+
+test('v0.3 รหัสเดียวกันต่าง source เป็นคนเดียว: slot · เพดาน · participants รวมกัน', () => {
+  const central = createMockCentral();
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0001'), 'morning')])).committed, true);
+  let r = central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'morning')]));
+  assert.deepEqual(r.rejected.map((x) => x.code), ['SLOT_ALREADY_RECORDED']);
+  // ใน batch เดียวกันก็เช่นกัน
+  r = central.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0002'), 'evening'), withRef(ref('member', '000-0002'), 'evening')]));
+  assert.deepEqual(r.rejected.map((x) => x.code), ['SLOT_ALREADY_RECORDED']);
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'midday'), withRef(ref('demo', '000-0001'), 'evening')])).committed, true);
+  assert.equal(central.personToday(BRANCH, ref('member', '000-0001')).minutes_today, 15);
+  assert.deepEqual(central.personToday(BRANCH, ref('demo', '000-0001')).slots, { morning: true, midday: true, evening: true });
+  const capped = createMockCentral({ timezone: 'Asia/Bangkok' });
+  capped.recordEvidence(BRANCH, batch(['morning', 'midday', 'evening'].map((s) => withRef(ref('demo', '000-0003'), s))));
+  assert.equal(capped.personToday(BRANCH, ref('member', '000-0003')).minutes_today, 15);
+  const s = central.summary(BRANCH);
+  assert.equal(s.participants, 1);
+  assert.equal(s.total_minutes, 15);
+  assert.deepEqual(central.memberStats(BRANCH).items.map((m) => [m.member_code, m.total_minutes]), [['000-0001', 15]]);
+});
+
+test('v0.3 ไล่ members และ daily.csv ด้วย limit=1 บนข้อมูลหลาย source ได้ครบเท่า limit=500 ไม่ซ้ำ', () => {
+  const c = clock();
+  const central = createMockCentral({ now: c.now });
+  for (let day = 0; day < 2; day++) {
+    central.recordEvidence(BRANCH, batch([
+      withRef(ref('demo', '000-0001'), 'morning'),
+      withRef(ref('member', '000-0001'), 'midday'),
+      withRef(ref('member', '000-0002'), 'morning'),
+      withRef(ref('demo', '000-0003'), 'evening'),
+      withRef(ref('member', '000-0003'), 'morning'),
+    ]));
+    c.nextDay();
+  }
+  const full = central.memberStats(BRANCH, { limit: 500 }).items;
+  const walked = [];
+  let cursor;
+  do {
+    const page = central.memberStats(BRANCH, { cursor, limit: 1 });
+    walked.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  assert.deepEqual(walked, full);
+  assert.deepEqual(full.map((m) => m.member_code), ['000-0001', '000-0002', '000-0003']);
+
+  const allRows = parseCsv(central.dailyRowsCsv(BRANCH, { limit: 500 }).body).slice(1).map((l) => l.join(','));
+  const rows = [];
+  cursor = undefined;
+  do {
+    const res = central.dailyRowsCsv(BRANCH, { cursor, limit: 1 });
+    rows.push(...parseCsv(res.body).slice(1).map((l) => l.join(',')));
+    cursor = res.headers['x-campaign-next-cursor'];
+  } while (cursor);
+  assert.equal(allRows.length, 10);
+  assert.deepEqual(rows, allRows);
+  assert.equal(new Set(rows).size, rows.length);
+});

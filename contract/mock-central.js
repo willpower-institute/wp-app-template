@@ -49,7 +49,7 @@ export function localDate(timezone, now = new Date()) {
 const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
 // ช่องว่างหน้า/หลังต้องปฏิเสธ ไม่ตัดให้ — "000-0001 " กับ "000-0001" จะกลายเป็นคนละคนแล้วได้เพดานซ้อน
 const exactText = (v) => nonEmpty(v) && v === v.trim();
-const validPersonRef = (ref) =>
+const personRefShape = (ref) =>
   Boolean(ref) && typeof ref === 'object' && exactText(ref.source) && exactText(ref.value);
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -124,7 +124,11 @@ export function createMockCentral({
   orgs = DEFAULT_ORGS,
   campaignStart, // 'YYYY-MM-DD' ไม่บังคับ · ไม่ใส่ = ไม่จำกัดช่วง (โหมดตัวอย่างของแอป)
   campaignEnd,
+  // source ที่แคมเปญรับ — ระบบกลางประกาศต่อแคมเปญ (76m: 'member' · โหมดตัวอย่าง: 'demo')
+  personSources = ['demo', 'member'],
 } = {}) {
+  const acceptedSources = new Set(personSources);
+  const validPersonRef = (ref) => personRefShape(ref) && acceptedSources.has(ref.source);
   const start = campaignDate(campaignStart, 'campaignStart');
   const end = campaignDate(campaignEnd, 'campaignEnd');
   if (start && end && start > end) throw new TypeError('campaignStart must not be after campaignEnd');
@@ -139,7 +143,8 @@ export function createMockCentral({
   const groupReports = new Map(); // `${branch}|${org_ref}|${date}` -> evidence_id
   let totalMinutes = 0;
 
-  const personKey = (ref) => `${ref.source}:${ref.value}`;
+  // ตัวตน = person_ref.value (member_code) — key เดียวกันทุกที่: slot · เพดาน · participants · สถิติ · CSV
+  const personKey = (ref) => ref.value;
   const asOf = () => now().toISOString();
 
   function minutesOn(person, date) {
