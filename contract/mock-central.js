@@ -1,4 +1,7 @@
-// ระบบกลางจำลอง (โหมดตัวอย่าง + เทสต์) ตามร่าง contract `campaign.v1` v0.2 (ดู campaign.v1.md)
+// ระบบกลางจำลอง (โหมดตัวอย่าง + เทสต์) ตาม contract `campaign.v1` v0.3 (ดู campaign.v1.md)
+//
+// campaign.v1.md เป็นฉบับหลัก เนื้อหาเป็นของระบบกลาง — ไฟล์นี้ต้องตามให้ตรง
+// เครื่องนับจริงของระบบกลาง: pstack-vidhisa addon `minute_campaign`
 //
 // ไฟล์นี้เล่นบทระบบกลาง จึงเป็นที่เดียวในแอปที่คิดนาที ยอด และกติกาได้
 // ฝั่งแอปของสาขา (public/ และ server/) ห้ามคิดเอง — ส่งแค่ evidence ดิบ แล้วแสดงผลที่ระบบกลางตอบมา
@@ -44,6 +47,20 @@ export function localDate(timezone, now = new Date()) {
 }
 
 const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+// ช่องว่างหน้า/หลังต้องปฏิเสธ ไม่ตัดให้ — "000-0001 " กับ "000-0001" จะกลายเป็นคนละคนแล้วได้เพดานซ้อน
+const exactText = (v) => nonEmpty(v) && v === v.trim();
+const personRefShape = (ref) =>
+  Boolean(ref) && typeof ref === 'object' && exactText(ref.source) && exactText(ref.value);
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+function campaignDate(value, name) {
+  if (value === undefined || value === null) return null;
+  const parsed = typeof value === 'string' && DATE_PATTERN.test(value) ? new Date(`${value}T00:00:00Z`) : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new TypeError(`${name} must be a YYYY-MM-DD date`);
+  }
+  return value;
+}
 const isPositiveInt = (v) => Number.isInteger(v) && v >= 1;
 
 // cursor ทึบ: เก็บ key ของแถวสุดท้ายที่ส่งไปแล้ว (keyset) — แถวใหม่ระหว่างไล่หน้าไม่ทำให้ซ้ำหรือตก
@@ -99,12 +116,23 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+// mock ใช้เขตเวลาเดียว (`timezone`) · ระบบกลางจริงใช้เขตเวลาต่อสาขาสำหรับวันที่ของแถว ช่วงแคมเปญ
+// และ branch.today_minutes ส่วน today_minutes ระดับแคมเปญใช้เขตเวลาของแคมเปญ (contract ข้อ 3.3)
 export function createMockCentral({
   timezone = 'Asia/Bangkok',
   now = () => new Date(),
   orgs = DEFAULT_ORGS,
+  campaignStart, // 'YYYY-MM-DD' ไม่บังคับ · ไม่ใส่ = ไม่จำกัดช่วง (โหมดตัวอย่างของแอป)
+  campaignEnd,
+  // source ที่แคมเปญรับ — ระบบกลางประกาศต่อแคมเปญ (76m: 'member' · โหมดตัวอย่าง: 'demo')
+  personSources = ['demo', 'member'],
 } = {}) {
-  const batches = new Map(); // batch_ref -> { fingerprint, receipt }
+  const acceptedSources = new Set(personSources);
+  const validPersonRef = (ref) => personRefShape(ref) && acceptedSources.has(ref.source);
+  const start = campaignDate(campaignStart, 'campaignStart');
+  const end = campaignDate(campaignEnd, 'campaignEnd');
+  if (start && end && start > end) throw new TypeError('campaignStart must not be after campaignEnd');
+  const batches = new Map(); // `${branch}|${batch_ref}` -> { fingerprint, receipt } (จำต่อสาขา)
   const sessions = new Map(); // `${person}|${date}|${slot}` -> evidence_id
   const people = new Set();
   const rows = []; // แถวรายวันรายคนที่ commit แล้ว (สำหรับ API อ่าน)
@@ -115,7 +143,8 @@ export function createMockCentral({
   const groupReports = new Map(); // `${branch}|${org_ref}|${date}` -> evidence_id
   let totalMinutes = 0;
 
-  const personKey = (ref) => `${ref.source}:${ref.value}`;
+  // ตัวตน = person_ref.value (member_code) — key เดียวกันทุกที่: slot · เพดาน · participants · สถิติ · CSV
+  const personKey = (ref) => ref.value;
   const asOf = () => now().toISOString();
 
   function minutesOn(person, date) {
@@ -170,7 +199,7 @@ export function createMockCentral({
   }
 
   function personToday(branch, personRef) {
-    if (!personRef || !nonEmpty(personRef.source) || !nonEmpty(personRef.value)) {
+    if (!validPersonRef(personRef)) {
       throw new ContractError(400, 'INVALID_PERSON_REF');
     }
     const person = personKey(personRef);
@@ -258,13 +287,18 @@ export function createMockCentral({
 
     // ส่งซ้ำด้วย batch_ref เดิม: เนื้อหาเดิม = คืนใบรับเดิม · เนื้อหาต่าง = ปฏิเสธ
     const fingerprint = JSON.stringify({ branch, envelopes });
-    const prior = batches.get(req.batch_ref);
+    const batchKey = `${branch}|${req.batch_ref}`;
+    const prior = batches.get(batchKey);
     if (prior) {
       if (prior.fingerprint === fingerprint) return { ...prior.receipt, replayed: true };
       throw new ContractError(409, 'BATCH_REF_REUSED');
     }
 
+    // ตรวจหลังขั้น replay: batch ที่ commit แล้วส่งซ้ำยังได้ใบรับเดิมแม้พ้นช่วงแคมเปญแล้ว
     const date = localDate(timezone, now());
+    if ((start && date < start) || (end && date > end)) {
+      throw new ContractError(409, 'OUTSIDE_CAMPAIGN_PERIOD');
+    }
     const source = nonEmpty(req.source_ref) ? req.source_ref : 'unknown';
     const seenIds = new Set();
     const accepted = [];
@@ -318,7 +352,7 @@ export function createMockCentral({
       if (env.kind !== 'practice_session') { reject('UNKNOWN_EVIDENCE_KIND'); continue; }
       if (!RULES.slots.includes(env.slot)) { reject('UNKNOWN_SLOT'); continue; }
       const ref = env.person_ref;
-      if (!ref || !nonEmpty(ref.source) || !nonEmpty(ref.value)) { reject('INVALID_PERSON_REF'); continue; }
+      if (!validPersonRef(ref)) { reject('INVALID_PERSON_REF'); continue; }
 
       const person = personKey(ref);
       const key = `${person}|${date}|${env.slot}`;
@@ -359,7 +393,7 @@ export function createMockCentral({
       rejected,
     };
     // จำเฉพาะ batch ที่ commit แล้ว — batch ที่ถูกปฏิเสธแก้แล้วส่งใหม่ด้วย batch_ref เดิมได้
-    if (committed) batches.set(req.batch_ref, { fingerprint, receipt });
+    if (committed) batches.set(batchKey, { fingerprint, receipt });
     return receipt;
   }
 

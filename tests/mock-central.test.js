@@ -367,3 +367,203 @@ test('API อ่านเห็นเฉพาะสาขาตัวเอง'
   const [, ...lines] = parseCsv(central.dailyRowsCsv(BRANCH).body);
   assert.deepEqual(lines.map((l) => l[1]), ['000-0001']);
 });
+
+// ---------- v0.3 ----------
+
+function settableClock(iso) {
+  let t = new Date(iso);
+  return { now: () => t, set: (next) => { t = new Date(next); } };
+}
+
+const outside = { status: 409, code: 'OUTSIDE_CAMPAIGN_PERIOD' };
+
+test('v0.3 OUTSIDE_CAMPAIGN_PERIOD: วันแรกและวันสุดท้ายรับ · วันก่อนและวันหลัง 409 (ตามเขตเวลา)', () => {
+  const c = settableClock('2026-12-31T16:59:59Z'); // 31 ธ.ค. 23:59:59 ที่ไทย
+  const central = createMockCentral({ now: c.now, campaignStart: '2027-01-01', campaignEnd: '2027-01-31' });
+  assert.throws(() => central.recordEvidence(BRANCH, batch([practice('000-0001', 'morning')])), outside);
+  c.set('2026-12-31T17:00:00Z'); // 1 ม.ค. 00:00 ที่ไทย
+  assert.equal(central.recordEvidence(BRANCH, batch([practice('000-0002', 'morning')])).committed, true);
+  c.set('2027-01-31T16:59:59Z'); // 31 ม.ค. 23:59:59 ที่ไทย
+  assert.equal(central.recordEvidence(BRANCH, batch([practice('000-0003', 'morning')])).committed, true);
+  c.set('2027-01-31T17:00:00Z'); // 1 ก.พ. ที่ไทย
+  assert.throws(() => central.recordEvidence(BRANCH, batch([practice('000-0004', 'morning')])), outside);
+  assert.equal(central.summary(BRANCH).total_minutes, 10);
+});
+
+test('v0.3 OUTSIDE_CAMPAIGN_PERIOD ตรวจหลัง replay: batch ที่ commit แล้วส่งซ้ำได้ใบรับเดิมแม้พ้นช่วง', () => {
+  const c = settableClock('2027-01-10T02:00:00Z');
+  const central = createMockCentral({ now: c.now, campaignStart: '2027-01-01', campaignEnd: '2027-01-31' });
+  const req = batch([practice('000-0001', 'morning')]);
+  const first = central.recordEvidence(BRANCH, req);
+  c.set('2027-03-01T02:00:00Z');
+  assert.deepEqual(central.recordEvidence(BRANCH, req), { ...first, replayed: true });
+  assert.throws(() => central.recordEvidence(BRANCH, { ...req, envelopes: [practice('000-0001', 'midday')] }), {
+    code: 'BATCH_REF_REUSED',
+  });
+  // ตรวจรูปแบบ batch ก่อนช่วงแคมเปญ
+  assert.throws(() => central.recordEvidence(BRANCH, batch([])), { code: 'INVALID_ENVELOPES' });
+  assert.equal(central.summary(BRANCH).total_minutes, 5);
+});
+
+test('v0.3 ไม่ใส่ช่วงแคมเปญ = ไม่จำกัด · ใส่ด้านเดียวได้ · ค่าผิดรูปหรือกลับด้าน = throw', () => {
+  const c = settableClock('1999-01-01T02:00:00Z');
+  assert.equal(createMockCentral({ now: c.now }).recordEvidence(BRANCH, batch([practice('000-0001', 'morning')])).committed, true);
+  c.set('2099-12-31T02:00:00Z');
+  assert.equal(createMockCentral({ now: c.now }).recordEvidence(BRANCH, batch([practice('000-0001', 'morning')])).committed, true);
+  const startOnly = createMockCentral({ now: c.now, campaignStart: '2100-01-01' });
+  assert.throws(() => startOnly.recordEvidence(BRANCH, batch([practice('000-0001', 'morning')])), outside);
+  const endOnly = createMockCentral({ now: c.now, campaignEnd: '2099-12-30' });
+  assert.throws(() => endOnly.recordEvidence(BRANCH, batch([practice('000-0001', 'morning')])), outside);
+  for (const bad of ['2027-1-01', '2027/01/01', '2027-02-30', '2569-13-01', 20270101, '', 'today']) {
+    assert.throws(() => createMockCentral({ campaignStart: bad }), TypeError, String(bad));
+    assert.throws(() => createMockCentral({ campaignEnd: bad }), TypeError, String(bad));
+  }
+  assert.throws(() => createMockCentral({ campaignStart: '2027-02-01', campaignEnd: '2027-01-31' }), TypeError);
+  assert.doesNotThrow(() => createMockCentral({ campaignStart: '2027-01-31', campaignEnd: '2027-01-31' }));
+});
+
+const PADDED_REFS = [
+  { source: 'demo', value: '000-0001 ' },
+  { source: 'demo', value: ' 000-0001' },
+  { source: 'demo', value: '000-0001\t' },
+  { source: 'demo', value: '\t000-0001' },
+  { source: 'demo ', value: '000-0001' },
+  { source: ' demo', value: '000-0001' },
+  { source: 'demo\t', value: '000-0001' },
+];
+
+test('v0.3 person_ref มีช่องว่างหน้า/หลัง = INVALID_PERSON_REF ทั้ง recordEvidence และ personToday', () => {
+  const central = createMockCentral();
+  for (const ref of PADDED_REFS) {
+    const r = central.recordEvidence(BRANCH, batch([practice('000-0009', 'morning'), { ...practice('x', 'midday'), person_ref: ref }]));
+    assert.equal(r.committed, false, JSON.stringify(ref));
+    assert.deepEqual(r.rejected.map((x) => x.code), ['INVALID_PERSON_REF']);
+    assert.throws(() => central.personToday(BRANCH, ref), { status: 400, code: 'INVALID_PERSON_REF' }, JSON.stringify(ref));
+  }
+  assert.equal(central.summary(BRANCH).participants, 0);
+});
+
+test('v0.3 "000-0001" ครบเพดานแล้ว "000-0001␠" ไม่ได้นาทีเพิ่ม และไม่นับเป็นผู้ร่วมใหม่', () => {
+  const central = createMockCentral();
+  const full = ['morning', 'midday', 'evening'].map((slot) => practice('000-0001', slot));
+  assert.equal(central.recordEvidence(BRANCH, batch(full)).committed, true);
+  for (const value of ['000-0001 ', ' 000-0001', '000-0001\t']) {
+    const r = central.recordEvidence(BRANCH, batch([practice(value, 'morning')]));
+    assert.deepEqual(r.rejected.map((x) => x.code), ['INVALID_PERSON_REF']);
+  }
+  assert.equal(central.personToday(BRANCH, { source: 'demo', value: '000-0001' }).minutes_today, 15);
+  const s = central.summary(BRANCH);
+  assert.equal(s.participants, 1);
+  assert.equal(s.total_minutes, 15);
+  assert.equal(s.branch.minutes, 15);
+});
+
+test('v0.3 batch_ref นับต่อสาขา: คนละสาขา commit ได้ทั้งคู่ · สาขาเดียวกันเนื้อหาต่าง = BATCH_REF_REUSED', () => {
+  const central = createMockCentral();
+  const a = central.recordEvidence(BRANCH, { ...batch([practice('000-0001', 'morning')]), batch_ref: 'shared-batch' });
+  const b = central.recordEvidence('001', { ...batch([practice('001-0001', 'morning')], { branch: '001' }), batch_ref: 'shared-batch' });
+  assert.equal(a.committed, true);
+  assert.equal(b.committed, true);
+  assert.equal(b.replayed, undefined);
+  assert.throws(
+    () => central.recordEvidence(BRANCH, { ...batch([practice('000-0002', 'morning')]), batch_ref: 'shared-batch' }),
+    { status: 409, code: 'BATCH_REF_REUSED' },
+  );
+  assert.equal(central.memberStats('001').items.length, 1);
+});
+
+test('today_minutes และ branch.today_minutes ข้ามวัน: แถวเมื่อวานไม่อยู่ใน today (backlog W3.1)', () => {
+  const c = clock();
+  const central = createMockCentral({ now: c.now });
+  central.recordEvidence(BRANCH, batch([practice('000-0001', 'morning'), group({ participant_count: 2, minutes: 20 })]));
+  let s = central.summary(BRANCH);
+  assert.equal(s.today_minutes, 25);
+  assert.equal(s.branch.today_minutes, 5);
+  c.nextDay();
+  s = central.summary(BRANCH);
+  assert.equal(s.today_minutes, 0);
+  assert.equal(s.branch.today_minutes, 0);
+  assert.equal(s.total_minutes, 25);
+  assert.equal(s.branch.minutes, 5);
+  central.recordEvidence(BRANCH, batch([practice('000-0001', 'morning')]));
+  s = central.summary(BRANCH);
+  assert.equal(s.today_minutes, 5);
+  assert.equal(s.branch.today_minutes, 5);
+});
+
+// ---------- v0.3: ตัวตน = person_ref.value · source ต้องอยู่ในรายการ ----------
+
+const ref = (source, value) => ({ source, value });
+const withRef = (person_ref, slot) => ({ ...practice('x', slot), person_ref });
+
+test('v0.3 source นอกรายการที่แคมเปญรับ = INVALID_PERSON_REF ทั้ง recordEvidence และ personToday', () => {
+  const central = createMockCentral();
+  for (const source of ['line', 'LINE', 'Member', 'phone']) {
+    const r = central.recordEvidence(BRANCH, batch([practice('000-0009', 'morning'), withRef(ref(source, '000-0001'), 'midday')]));
+    assert.equal(r.committed, false, source);
+    assert.deepEqual(r.rejected.map((x) => x.code), ['INVALID_PERSON_REF']);
+    assert.throws(() => central.personToday(BRANCH, ref(source, '000-0001')), { status: 400, code: 'INVALID_PERSON_REF' }, source);
+  }
+  // ค่าตั้งต้นรับ demo และ member · กำหนดรายการต่อแคมเปญได้
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0002'), 'morning')])).committed, true);
+  const memberOnly = createMockCentral({ personSources: ['member'] });
+  assert.equal(memberOnly.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0001'), 'morning')])).rejected[0].code, 'INVALID_PERSON_REF');
+  assert.equal(memberOnly.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'morning')])).committed, true);
+});
+
+test('v0.3 รหัสเดียวกันต่าง source เป็นคนเดียว: slot · เพดาน · participants รวมกัน', () => {
+  const central = createMockCentral();
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0001'), 'morning')])).committed, true);
+  let r = central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'morning')]));
+  assert.deepEqual(r.rejected.map((x) => x.code), ['SLOT_ALREADY_RECORDED']);
+  // ใน batch เดียวกันก็เช่นกัน
+  r = central.recordEvidence(BRANCH, batch([withRef(ref('demo', '000-0002'), 'evening'), withRef(ref('member', '000-0002'), 'evening')]));
+  assert.deepEqual(r.rejected.map((x) => x.code), ['SLOT_ALREADY_RECORDED']);
+  assert.equal(central.recordEvidence(BRANCH, batch([withRef(ref('member', '000-0001'), 'midday'), withRef(ref('demo', '000-0001'), 'evening')])).committed, true);
+  assert.equal(central.personToday(BRANCH, ref('member', '000-0001')).minutes_today, 15);
+  assert.deepEqual(central.personToday(BRANCH, ref('demo', '000-0001')).slots, { morning: true, midday: true, evening: true });
+  const capped = createMockCentral({ timezone: 'Asia/Bangkok' });
+  capped.recordEvidence(BRANCH, batch(['morning', 'midday', 'evening'].map((s) => withRef(ref('demo', '000-0003'), s))));
+  assert.equal(capped.personToday(BRANCH, ref('member', '000-0003')).minutes_today, 15);
+  const s = central.summary(BRANCH);
+  assert.equal(s.participants, 1);
+  assert.equal(s.total_minutes, 15);
+  assert.deepEqual(central.memberStats(BRANCH).items.map((m) => [m.member_code, m.total_minutes]), [['000-0001', 15]]);
+});
+
+test('v0.3 ไล่ members และ daily.csv ด้วย limit=1 บนข้อมูลหลาย source ได้ครบเท่า limit=500 ไม่ซ้ำ', () => {
+  const c = clock();
+  const central = createMockCentral({ now: c.now });
+  for (let day = 0; day < 2; day++) {
+    central.recordEvidence(BRANCH, batch([
+      withRef(ref('demo', '000-0001'), 'morning'),
+      withRef(ref('member', '000-0001'), 'midday'),
+      withRef(ref('member', '000-0002'), 'morning'),
+      withRef(ref('demo', '000-0003'), 'evening'),
+      withRef(ref('member', '000-0003'), 'morning'),
+    ]));
+    c.nextDay();
+  }
+  const full = central.memberStats(BRANCH, { limit: 500 }).items;
+  const walked = [];
+  let cursor;
+  do {
+    const page = central.memberStats(BRANCH, { cursor, limit: 1 });
+    walked.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  assert.deepEqual(walked, full);
+  assert.deepEqual(full.map((m) => m.member_code), ['000-0001', '000-0002', '000-0003']);
+
+  const allRows = parseCsv(central.dailyRowsCsv(BRANCH, { limit: 500 }).body).slice(1).map((l) => l.join(','));
+  const rows = [];
+  cursor = undefined;
+  do {
+    const res = central.dailyRowsCsv(BRANCH, { cursor, limit: 1 });
+    rows.push(...parseCsv(res.body).slice(1).map((l) => l.join(',')));
+    cursor = res.headers['x-campaign-next-cursor'];
+  } while (cursor);
+  assert.equal(allRows.length, 10);
+  assert.deepEqual(rows, allRows);
+  assert.equal(new Set(rows).size, rows.length);
+});
