@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp, resolveMode } from '../server/app.js';
 import { createMockCentral, localDate } from '../contract/mock-central.js';
+import { createCentralClient } from '../server/central.js';
 import baseConfig from '../wp.config.js';
 
 const CREDENTIAL = 'wp_test_credential_DO_NOT_LEAK_7f3a9c'; // gitleaks:allow — credential ปลอมสำหรับเทสต์
@@ -208,6 +209,93 @@ test('โหมดจริง: ระบบกลางล่ม = 503 CENTRAL_
   const r = await json(await app.request('/api/campaign/summary'));
   assert.equal(r.status, 503);
   assert.equal(r.body.code, 'CENTRAL_UNREACHABLE');
+});
+
+// ---------- โหมดจริง: retry ของ CONCURRENT_SUBMIT (v0.4) ----------
+
+// fetch ปลอมที่ตอบตามลำดับ และจำทุกคำขอ · sleep ปลอมไม่รอจริง
+function scriptedCentral(replies) {
+  const calls = [];
+  const waits = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body, auth: init.headers.authorization });
+    const { status, body } = replies[Math.min(calls.length, replies.length) - 1];
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  };
+  const client = createCentralClient({
+    baseUrl: 'https://central.invalid/',
+    credential: CREDENTIAL,
+    fetchImpl,
+    retryDelayMs: () => 321,
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  return { client, calls, waits };
+}
+
+const evidenceRequest = () => ({
+  contract_version: 'campaign.v1',
+  branch: '000',
+  batch_ref: 'batch-retry-1',
+  source_ref: 'tests',
+  envelopes: [{ evidence_id: 'e-1', kind: 'practice_session', slot: 'morning', person_ref: { source: 'member', value: '000-0001' } }],
+});
+const CONCURRENT = { status: 409, body: { code: 'CONCURRENT_SUBMIT' } };
+const RECEIPT = { status: 200, body: { batch_ref: 'batch-retry-1', committed: true, accepted: [], duplicates: [], rejected: [] } };
+
+test('โหมดจริง: 409 CONCURRENT_SUBMIT แล้ว 200 = สำเร็จ · ส่ง body เดิมทุกไบต์ซ้ำครั้งเดียว', async () => {
+  const { client, calls, waits } = scriptedCentral([CONCURRENT, RECEIPT]);
+  const receipt = await client.recordEvidence('000', evidenceRequest());
+  assert.equal(receipt.committed, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].body, calls[0].body);
+  assert.equal(typeof calls[0].body, 'string');
+  assert.equal(calls[0].url, calls[1].url);
+  assert.equal(calls[0].url, 'https://central.invalid/campaign/v1/branches/000/evidence');
+  assert.deepEqual(waits, [321]);
+});
+
+test('โหมดจริง: CONCURRENT_SUBMIT สองครั้ง = ContractError 409 CONCURRENT_SUBMIT · ไม่ retry เกินครั้งเดียว', async () => {
+  const { client, calls, waits } = scriptedCentral([CONCURRENT, CONCURRENT, RECEIPT]);
+  await assert.rejects(client.recordEvidence('000', evidenceRequest()), (err) => {
+    assert.equal(err.status, 409);
+    assert.equal(err.code, 'CONCURRENT_SUBMIT');
+    assert.ok(!String(err.message).includes(CREDENTIAL));
+    return true;
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(waits, [321]);
+});
+
+test('โหมดจริง: รหัสอื่นและ GET ไม่ retry', async () => {
+  for (const reply of [
+    { status: 409, body: { code: 'BATCH_REF_REUSED' } },
+    { status: 409, body: { code: 'OUTSIDE_CAMPAIGN_PERIOD' } },
+    { status: 401, body: { code: 'CONCURRENT_SUBMIT' } },
+    { status: 503, body: { code: 'CONCURRENT_SUBMIT' } },
+  ]) {
+    const { client, calls, waits } = scriptedCentral([reply, RECEIPT]);
+    await assert.rejects(client.recordEvidence('000', evidenceRequest()));
+    assert.equal(calls.length, 1, reply.body.code);
+    assert.deepEqual(waits, []);
+  }
+  const { client, calls } = scriptedCentral([CONCURRENT, CONCURRENT, RECEIPT]);
+  await assert.rejects(client.summary('000'), { status: 409, code: 'CONCURRENT_SUBMIT' });
+  await assert.rejects(client.personToday('000', { source: 'member', value: '000-0001' }), { code: 'CONCURRENT_SUBMIT' });
+  assert.equal(calls.length, 2); // หนึ่งครั้งต่อ GET
+  assert.ok(calls.every((c) => c.method === 'GET' && c.body === undefined));
+});
+
+test('โหมดจริง: CONCURRENT_SUBMIT ผ่าน HTTP จริง: ยิงสองครั้งพร้อม credential ใน header แล้วส่ง 409 ต่อ', async () => {
+  let n = 0;
+  const central = await fakeCentral(() => (++n <= 2 ? CONCURRENT : RECEIPT));
+  try {
+    const client = createCentralClient({ baseUrl: central.url, credential: CREDENTIAL, sleep: async () => {} });
+    await assert.rejects(client.recordEvidence('000', evidenceRequest()), { status: 409, code: 'CONCURRENT_SUBMIT' });
+    assert.equal(central.seen.length, 2);
+    assert.ok(central.seen.every((r) => r.auth === `Bearer ${CREDENTIAL}`));
+  } finally {
+    await central.close();
+  }
 });
 
 // ---------- ระบบกลางจำลอง ----------
