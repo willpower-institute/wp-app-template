@@ -9,6 +9,7 @@ const MESSAGES = {
   SLOT_ALREADY_RECORDED: 'ช่วงนี้บันทึกไปแล้ววันนี้',
   DAILY_CAP_REACHED: 'วันนี้บันทึกครบแล้ว',
   OUTSIDE_CAMPAIGN_PERIOD: 'ตอนนี้อยู่นอกช่วงแคมเปญ',
+  CONCURRENT_SUBMIT: 'ระบบกลางกำลังรับข้อมูลพร้อมกันหลายรายการ ลองส่งอีกครั้ง',
   INVALID_MEMBER: 'รหัสสมาชิกไม่ถูกต้อง',
   MEMBER_AUTH_NOT_DECIDED: 'การบันทึกรายคนยังปิดอยู่',
   PROJECT_DISABLED: 'สาขานี้ยังไม่ได้เปิดโครงการนี้',

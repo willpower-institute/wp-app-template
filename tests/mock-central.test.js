@@ -567,3 +567,99 @@ test('v0.3 ไล่ members และ daily.csv ด้วย limit=1 บนข�
   assert.deepEqual(rows, allRows);
   assert.equal(new Set(rows).size, rows.length);
 });
+
+// ---------- v0.4 ----------
+
+// สร้าง object ใหม่ที่ key เรียงกลับด้านทุกชั้น (เนื้อหาเดิม · ลำดับ array เดิม)
+function reverseKeys(value) {
+  if (Array.isArray(value)) return value.map(reverseKeys);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reverseKeys(value[key])]));
+  }
+  return value;
+}
+
+test('v0.4 replay เทียบแบบ canonical: key สลับลำดับ (envelope และ person_ref) = ใบรับเดิม', () => {
+  const central = createMockCentral();
+  const req = batch([
+    practice('000-0001', 'morning', { external_ref: 'form-1' }),
+    group({ external_ref: 'sheet-1' }),
+  ]);
+  const first = central.recordEvidence(BRANCH, req);
+  assert.equal(first.committed, true);
+  const shuffled = { ...reverseKeys(req), source_ref: 'another-channel@1' }; // source_ref ไม่อยู่ในการเทียบ
+  assert.notEqual(JSON.stringify(shuffled.envelopes), JSON.stringify(req.envelopes));
+  assert.notEqual(Object.keys(shuffled.envelopes[0].person_ref)[0], Object.keys(req.envelopes[0].person_ref)[0]);
+  assert.deepEqual(central.recordEvidence(BRANCH, shuffled), { ...first, replayed: true });
+  assert.equal(central.summary(BRANCH).branch.minutes, 5);
+});
+
+test('v0.4 replay: เนื้อหาต่าง หรือลำดับใน array ต่าง = BATCH_REF_REUSED · คนละสาขาไม่ปนกัน', () => {
+  const central = createMockCentral();
+  const req = batch([practice('000-0001', 'morning'), practice('000-0002', 'morning')]);
+  central.recordEvidence(BRANCH, req);
+  const variants = [
+    { ...req, envelopes: [...req.envelopes].reverse() }, // ลำดับ envelope
+    { ...req, envelopes: [{ ...req.envelopes[0], slot: 'midday' }, req.envelopes[1]] },
+    { ...req, envelopes: [req.envelopes[0]] },
+    { ...req, envelopes: [{ ...req.envelopes[0], external_ref: 'new' }, req.envelopes[1]] },
+  ];
+  for (const variant of variants) {
+    assert.throws(() => central.recordEvidence(BRANCH, variant), { status: 409, code: 'BATCH_REF_REUSED' });
+  }
+  // batch_ref เดียวกัน เนื้อหาเดียวกัน แต่อีกสาขา: เป็น batch ใหม่ของสาขานั้น ไม่ใช่ replay
+  const other = central.recordEvidence('001', {
+    ...req,
+    branch: '001',
+    envelopes: [practice('001-0001', 'morning')],
+  });
+  assert.equal(other.committed, true);
+  assert.equal(other.replayed, undefined);
+  assert.throws(() => central.recordEvidence(BRANCH, { ...req, envelopes: other.accepted }), {
+    code: 'BATCH_REF_REUSED',
+  });
+});
+
+test('v0.4 จำลอง CONCURRENT_SUBMIT: ไม่บันทึกอะไร · ส่งคำขอเดิมซ้ำแล้ว commit · ค่าเริ่มต้นไม่จำลอง', () => {
+  const central = createMockCentral();
+  const ref = { source: 'demo', value: '000-0001' };
+  // ค่าเริ่มต้น: ไม่มีการจำลอง
+  assert.equal(central.recordEvidence(BRANCH, batch([practice('000-0009', 'morning')])).committed, true);
+
+  const before = { summary: central.summary(BRANCH), today: central.personToday(BRANCH, ref) };
+  const req = batch([practice('000-0001', 'morning', { external_ref: 'form-9' }), group()]);
+  central.simulateConcurrentSubmit(BRANCH);
+  assert.throws(() => central.recordEvidence(BRANCH, req), { status: 409, code: 'CONCURRENT_SUBMIT' });
+  const strip = (x) => ({ ...x, as_of: null });
+  assert.deepEqual(strip(central.summary(BRANCH)), strip(before.summary));
+  assert.deepEqual(strip(central.personToday(BRANCH, ref)), strip(before.today));
+  assert.equal(central.memberStats(BRANCH).items.length, 1);
+
+  // คำขอเดิมทุกอย่าง: commit ครั้งเดียว แล้วส่งอีกได้ใบรับเดิม
+  const receipt = central.recordEvidence(BRANCH, req);
+  assert.equal(receipt.committed, true);
+  assert.equal(receipt.duplicates.length, 0); // external_ref ไม่ถูกจำตอนชน
+  assert.equal(central.personToday(BRANCH, ref).minutes_today, 5);
+  assert.deepEqual(central.recordEvidence(BRANCH, req), { ...receipt, replayed: true });
+});
+
+test('v0.4 CONCURRENT_SUBMIT จำลองต่อสาขา · replay และ batch ที่ถูกปฏิเสธไม่ใช้สิทธิ์ชน', () => {
+  const central = createMockCentral();
+  const committed = batch([practice('000-0001', 'morning')]);
+  central.recordEvidence(BRANCH, committed);
+  central.simulateConcurrentSubmit(BRANCH, 2);
+  // replay ไม่มีอะไรให้เขียน · batch ที่ถูกปฏิเสธก็ไม่เขียน
+  assert.equal(central.recordEvidence(BRANCH, committed).replayed, true);
+  assert.equal(central.recordEvidence(BRANCH, batch([practice('000-0002', 'night')])).committed, false);
+  // อีกสาขาไม่โดน
+  assert.equal(
+    central.recordEvidence('001', batch([practice('001-0001', 'morning')], { branch: '001' })).committed,
+    true,
+  );
+  const req = batch([practice('000-0003', 'morning')]);
+  for (let i = 0; i < 2; i++) {
+    assert.throws(() => central.recordEvidence(BRANCH, req), { code: 'CONCURRENT_SUBMIT' });
+  }
+  assert.equal(central.recordEvidence(BRANCH, req).committed, true);
+  assert.throws(() => central.simulateConcurrentSubmit(BRANCH, 0), TypeError);
+});

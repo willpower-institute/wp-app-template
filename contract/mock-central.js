@@ -1,4 +1,4 @@
-// ระบบกลางจำลอง (โหมดตัวอย่าง + เทสต์) ตาม contract `campaign.v1` v0.3 (ดู campaign.v1.md)
+// ระบบกลางจำลอง (โหมดตัวอย่าง + เทสต์) ตาม contract `campaign.v1` v0.4 (ดู campaign.v1.md)
 //
 // campaign.v1.md เป็นฉบับหลัก เนื้อหาเป็นของระบบกลาง — ไฟล์นี้ต้องตามให้ตรง
 // เครื่องนับจริงของระบบกลาง: pstack-vidhisa addon `minute_campaign`
@@ -62,6 +62,31 @@ function campaignDate(value, name) {
   return value;
 }
 const isPositiveInt = (v) => Number.isInteger(v) && v >= 1;
+
+// เรียงแบบ code point เหมือน sort_keys ของ Python (sort ปกติของ JS เทียบ UTF-16 ต่างกันเมื่อมีอักขระนอก BMP)
+function compareCodePoints(a, b) {
+  const x = Array.from(a);
+  const y = Array.from(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d !== 0) return d;
+  }
+  return x.length - y.length;
+}
+
+// JSON แบบ canonical ของเนื้อหา batch (contract ข้อ 4): เรียง key ทุกชั้น · คงลำดับใน array ·
+// เทียบเท่า json.dumps(envelopes, sort_keys=True, separators=(",", ":"), ensure_ascii=False) ของระบบกลาง
+// เมื่อตัวเลขเป็นจำนวนเต็ม (ทศนิยมแสดงต่างกันระหว่าง JS กับ Python เช่น 1.0)
+export function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item ?? null)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort(compareCodePoints);
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
 
 // cursor ทึบ: เก็บ key ของแถวสุดท้ายที่ส่งไปแล้ว (keyset) — แถวใหม่ระหว่างไล่หน้าไม่ทำให้ซ้ำหรือตก
 // ใช้ btoa/atob แทน Buffer เพื่อให้รันบน Cloudflare Workers ได้ด้วย
@@ -141,6 +166,7 @@ export function createMockCentral({
     Object.entries(orgs).map(([branch, refs]) => [branch, new Set(refs)]),
   );
   const groupReports = new Map(); // `${branch}|${org_ref}|${date}` -> evidence_id
+  const concurrentCollisions = new Map(); // branch -> จำนวน batch ถัดไปที่จะชน (จำลอง · ค่าเริ่มต้นไม่มี)
   let totalMinutes = 0;
 
   // ตัวตน = person_ref.value (member_code) — key เดียวกันทุกที่: slot · เพดาน · participants · สถิติ · CSV
@@ -154,6 +180,16 @@ export function createMockCentral({
       if (p === person && d === date) m += RULES.minutesPerSession;
     }
     return m;
+  }
+
+  /**
+   * จำลองผู้เขียนพร้อมกัน (ใช้ในเทสต์ · ค่าเริ่มต้นไม่จำลอง): batch ถัดไป `times` ครั้งของสาขานี้ที่จะบันทึกจริง
+   * ตอบ 409 CONCURRENT_SUBMIT และไม่บันทึกอะไร · replay และ batch ที่ถูกปฏิเสธไม่ชน (ไม่มีอะไรให้เขียน)
+   * เหมือนระบบกลางที่ชนตอน insert เท่านั้น
+   */
+  function simulateConcurrentSubmit(branch, times = 1) {
+    if (!nonEmpty(branch) || !isPositiveInt(times)) throw new TypeError('branch and times >= 1 required');
+    concurrentCollisions.set(branch, (concurrentCollisions.get(branch) ?? 0) + times);
   }
 
   /** ลงทะเบียนหน่วยงานกับสาขา (ระบบกลางจำลอง · ใช้ในเทสต์) */
@@ -285,8 +321,9 @@ export function createMockCentral({
       throw new ContractError(400, 'INVALID_ENVELOPES');
     }
 
-    // ส่งซ้ำด้วย batch_ref เดิม: เนื้อหาเดิม = คืนใบรับเดิม · เนื้อหาต่าง = ปฏิเสธ
-    const fingerprint = JSON.stringify({ branch, envelopes });
+    // ส่งซ้ำด้วย batch_ref เดิม (ต่อสาขา): เนื้อหาเดิม = คืนใบรับเดิม · เนื้อหาต่าง = ปฏิเสธ
+    // เทียบแบบ canonical: ลำดับ key ไม่มีผล · ลำดับใน array มีผล (contract ข้อ 4)
+    const fingerprint = canonicalJson(envelopes);
     const batchKey = `${branch}|${req.batch_ref}`;
     const prior = batches.get(batchKey);
     if (prior) {
@@ -369,6 +406,13 @@ export function createMockCentral({
     }
 
     const committed = rejected.length === 0;
+    if (committed && concurrentCollisions.get(branch)) {
+      // ชนกับผู้เขียนพร้อมกันแม้คิดใหม่แล้ว: ไม่บันทึกอะไร · ส่งคำขอเดิมซ้ำได้อย่างปลอดภัย
+      const left = concurrentCollisions.get(branch) - 1;
+      if (left > 0) concurrentCollisions.set(branch, left);
+      else concurrentCollisions.delete(branch);
+      throw new ContractError(409, 'CONCURRENT_SUBMIT');
+    }
     if (committed) {
       for (const [key, { id, person, member_code, slot }] of pending) {
         sessions.set(key, id);
@@ -397,5 +441,14 @@ export function createMockCentral({
     return receipt;
   }
 
-  return { summary, personToday, memberStats, dailyRowsCsv, recordEvidence, registerOrg, rules: RULES };
+  return {
+    summary,
+    personToday,
+    memberStats,
+    dailyRowsCsv,
+    recordEvidence,
+    registerOrg,
+    simulateConcurrentSubmit,
+    rules: RULES,
+  };
 }
